@@ -133,6 +133,29 @@ app.post("/login", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+// GET route for dashboard data, protected by authentication
+app.get("/api/dashboard", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().slice(0, 10);
+
+    // SQL query to get a summary of activity for today
+    const query = `
+      SELECT website_url, SUM(total_time_seconds) as total_time
+      FROM time_tracking
+      WHERE user_id = ? AND visit_date = ?
+      GROUP BY website_url
+      ORDER BY total_time DESC;
+    `;
+
+    const [results] = await pool.query(query, [userId, today]);
+    res.json(results);
+  } catch (error) {
+    console.error("!!! ERROR IN /api/dashboard ROUTE:", error);
+    res.status(500).json({ error: "Failed to fetch dashboard data." });
+  }
+});
 
 // Final /track route with detailed logging
 app.post("/track", authenticateToken, async (req, res) => {
