@@ -11,10 +11,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const saltRounds = 10;
 
-// Secure CORS Configuration
+//cors configuration
+
 const whitelist = [
-  // Add your dashboard's URL here when you deploy it
-  // e.g., 'https://my-dashboard.onrender.com'
+  "http://127.0.0.1:5500", // <-- ADD THIS LINE for local testing
 ];
 const corsOptions = {
   origin: function (origin, callback) {
