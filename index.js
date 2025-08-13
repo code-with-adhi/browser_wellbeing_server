@@ -134,29 +134,41 @@ app.post("/login", async (req, res) => {
   }
 });
 // GET route for dashboard data, protected by authentication
+// In backend/index.js
+
+// GET route for dashboard data, now with a dynamic time range
 app.get("/api/dashboard", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    // Get today's date in YYYY-MM-DD format
-    const today = new Date().toISOString().slice(0, 10);
+    const { range } = req.query; // Get the 'range' from the URL, e.g., 'today' or 'week'
 
-    // SQL query to get a summary of activity for today
+    let dateCondition = "";
+
+    // Set the appropriate SQL condition based on the range parameter
+    if (range === "week") {
+      // Condition for the current week (Monday to now)
+      dateCondition = "AND YEARWEEK(visit_date, 1) = YEARWEEK(CURDATE(), 1)";
+    } else {
+      // Default condition for today's data
+      dateCondition = "AND visit_date = CURDATE()";
+    }
+
+    // We use a template literal to safely inject the WHERE condition
     const query = `
       SELECT website_url, SUM(total_time_seconds) as total_time
       FROM time_tracking
-      WHERE user_id = ? AND visit_date = ?
+      WHERE user_id = ? ${dateCondition}
       GROUP BY website_url
       ORDER BY total_time DESC;
     `;
 
-    const [results] = await pool.query(query, [userId, today]);
+    const [results] = await pool.query(query, [userId]);
     res.json(results);
   } catch (error) {
     console.error("!!! ERROR IN /api/dashboard ROUTE:", error);
     res.status(500).json({ error: "Failed to fetch dashboard data." });
   }
 });
-
 // Final /track route with detailed logging
 app.post("/track", authenticateToken, async (req, res) => {
   console.log("--- Received request for /track endpoint ---");
