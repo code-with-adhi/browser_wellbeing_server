@@ -17,37 +17,27 @@ const PORT = process.env.PORT || 3000;
 // Set the number of salt rounds for password hashing
 const saltRounds = 10;
 
-// This is your "guest list" of allowed websites.
-const whitelist = [
-  // This will be filled in later when you deploy your dashboard frontend.
-];
-
+// --- Your CORS Configuration ---
+const whitelist = ["https://your-dashboard-name.onrender.com"];
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow if the origin is in our whitelist (for the future dashboard)
     if (whitelist.indexOf(origin) !== -1 || !origin) {
       callback(null, true);
-    }
-    // OR, automatically allow any request coming from a Chrome Extension
-    else if (origin && origin.startsWith("chrome-extension://")) {
+    } else if (origin && origin.startsWith("chrome-extension://")) {
       callback(null, true);
-    }
-    // Otherwise, block the request
-    else {
+    } else {
       callback(new Error("This origin is not allowed by CORS"));
     }
   },
 };
-
-// Use the CORS middleware with your custom options
 app.use(cors(corsOptions));
-
-// Middleware to parse JSON bodies from incoming requests
 app.use(express.json());
 
 // ----------------------------------------------------------------------
 // Database Connection Pool
 // ----------------------------------------------------------------------
+
+// === MODIFICATION 1: ADDED SSL OPTION ===
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -57,9 +47,12 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  ssl: {
+    // This is required by many cloud database providers like Aiven
+    rejectUnauthorized: false,
+  },
 });
 
-// A simple function to test the database connection when the server starts
 async function testConnection() {
   try {
     const connection = await pool.getConnection();
@@ -77,11 +70,9 @@ testConnection();
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-
   if (token == null) {
     return res.status(401).json({ error: "Authentication token is required" });
   }
-
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       return res.status(403).json({ error: "Invalid or expired token" });
@@ -95,21 +86,18 @@ const authenticateToken = (req, res, next) => {
 // API Routes
 // ----------------------------------------------------------------------
 
-// Root endpoint to check if the server is running
 app.get("/", (req, res) => {
   res.send("Welcome to the Browser Wellbeing Tracker API!");
 });
 
-// Registration route: POST /register
 app.post("/register", async (req, res) => {
+  // Your existing register code...
   const { username, password } = req.body;
-
   if (!username || !password) {
     return res
       .status(400)
       .json({ error: "Username and password are required" });
   }
-
   try {
     const [existingUser] = await pool.query(
       "SELECT id FROM users WHERE username = ?",
@@ -118,14 +106,11 @@ app.post("/register", async (req, res) => {
     if (existingUser.length > 0) {
       return res.status(409).json({ error: "Username already exists" });
     }
-
     const password_hash = await bcrypt.hash(password, saltRounds);
-
     const [result] = await pool.query(
       "INSERT INTO users (username, password_hash) VALUES (?, ?)",
       [username, password_hash]
     );
-
     res.status(201).json({
       message: "User registered successfully",
       userId: result.insertId,
@@ -136,36 +121,29 @@ app.post("/register", async (req, res) => {
   }
 });
 
-// Login route: POST /login
 app.post("/login", async (req, res) => {
+  // Your existing login code...
   const { username, password } = req.body;
-
   if (!username || !password) {
     return res
       .status(400)
       .json({ error: "Username and password are required" });
   }
-
   try {
     const [users] = await pool.query("SELECT * FROM users WHERE username = ?", [
       username,
     ]);
     const user = users[0];
-
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
-
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
-
     if (!passwordMatch) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
-
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {
       expiresIn: "700h",
     });
-
     res.status(200).json({ message: "Login successful", token });
   } catch (error) {
     console.error("Login error:", error);
@@ -173,38 +151,43 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// Protected route to receive time-tracking data and save it to the database
+// === MODIFICATION 2: DETAILED LOGGING IN /track ROUTE ===
 app.post("/track", authenticateToken, async (req, res) => {
-  const userId = req.user.userId;
-  const { website_url, website_title, total_time_seconds } = req.body; // <-- Receive title here
-  const visit_date = new Date().toISOString().slice(0, 10);
-
-  if (!website_url || total_time_seconds === undefined) {
-    return res
-      .status(400)
-      .json({ error: "Missing website_url or total_time_seconds" });
-  }
-
+  console.log("--- Received request for /track endpoint ---");
   try {
+    const userId = req.user.userId;
+    const { website_url, website_title, total_time_seconds } = req.body;
+    const visit_date = new Date().toISOString().slice(0, 10);
+    console.log("Data received from extension:", {
+      userId,
+      website_url,
+      total_time_seconds,
+    });
+    if (!website_url || total_time_seconds === undefined) {
+      console.log("Validation failed: Missing required data.");
+      return res
+        .status(400)
+        .json({ error: "Missing website_url or total_time_seconds" });
+    }
     const query = `
-      INSERT INTO time_tracking (user_id, website_url, website_title, visit_date, total_time_seconds)
-      VALUES (?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE total_time_seconds = total_time_seconds + ?
-    `;
+      INSERT INTO time_tracking (user_id, website_url, website_title, visit_date, total_time_seconds)
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE total_time_seconds = total_time_seconds + VALUES(total_time_seconds)
+    `;
     const values = [
       userId,
       website_url,
       website_title,
       visit_date,
       total_time_seconds,
-      total_time_seconds,
     ];
-
+    console.log("Attempting to execute database query...");
     await pool.query(query, values);
+    console.log("Query successful. Sending 200 OK response.");
     res.status(200).json({ message: "Data saved successfully" });
   } catch (error) {
-    console.error("Error saving time-tracking data:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("!!! ERROR IN /track ROUTE:", error);
+    res.status(500).json({ error: "Internal server error during tracking." });
   }
 });
 
