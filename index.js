@@ -1,56 +1,30 @@
-// index.js
+// index.js - TEMPORARY DEBUGGING VERSION
 
-// Load environment variables from a .env file
 require("dotenv").config();
-
-// Import necessary libraries
 const express = require("express");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
 
-// Initialize Express app and set the port
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Set the number of salt rounds for password hashing
 const saltRounds = 10;
 
-// --- Your CORS Configuration ---
-const whitelist = ["https://your-dashboard-name.onrender.com"];
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (whitelist.indexOf(origin) !== -1 || !origin) {
-      callback(null, true);
-    } else if (origin && origin.startsWith("chrome-extension://")) {
-      callback(null, true);
-    } else {
-      callback(new Error("This origin is not allowed by CORS"));
-    }
-  },
-};
-app.use(cors(corsOptions));
+// === TEMPORARY DEBUG MODIFICATION 1: Use simple, open CORS ===
+// This will rule out any issues with our custom CORS options.
+console.log("Setting CORS to allow all origins for debugging...");
+app.use(cors());
+
 app.use(express.json());
 
-// ----------------------------------------------------------------------
-// Database Connection Pool
-// ----------------------------------------------------------------------
-
-// === MODIFICATION 1: ADDED SSL OPTION ===
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  ssl: {
-    // This is required by many cloud database providers like Aiven
-    rejectUnauthorized: false,
-  },
+  ssl: { rejectUnauthorized: false },
 });
 
 async function testConnection() {
@@ -64,9 +38,6 @@ async function testConnection() {
 }
 testConnection();
 
-// ----------------------------------------------------------------------
-// JWT Authentication Middleware
-// ----------------------------------------------------------------------
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -82,16 +53,12 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// ----------------------------------------------------------------------
-// API Routes
-// ----------------------------------------------------------------------
-
-app.get("/", (req, res) => {
-  res.send("Welcome to the Browser Wellbeing Tracker API!");
-});
-
+// --- Your other routes for login/register remain the same ---
+app.get("/", (req, res) =>
+  res.send("Welcome to the Browser Wellbeing Tracker API!")
+);
+// ... (your /register and /login routes) ...
 app.post("/register", async (req, res) => {
-  // Your existing register code...
   const { username, password } = req.body;
   if (!username || !password) {
     return res
@@ -120,9 +87,7 @@ app.post("/register", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 app.post("/login", async (req, res) => {
-  // Your existing login code...
   const { username, password } = req.body;
   if (!username || !password) {
     return res
@@ -151,49 +116,53 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// === MODIFICATION 2: DETAILED LOGGING IN /track ROUTE ===
-app.post("/track", authenticateToken, async (req, res) => {
-  console.log("--- Received request for /track endpoint ---");
-  try {
-    const userId = req.user.userId;
-    const { website_url, website_title, total_time_seconds } = req.body;
-    const visit_date = new Date().toISOString().slice(0, 10);
-    console.log("Data received from extension:", {
-      userId,
-      website_url,
-      total_time_seconds,
-    });
-    if (!website_url || total_time_seconds === undefined) {
-      console.log("Validation failed: Missing required data.");
-      return res
-        .status(400)
-        .json({ error: "Missing website_url or total_time_seconds" });
-    }
-    const query = `
+// === TEMPORARY DEBUG MODIFICATION 2: Remove 'authenticateToken' middleware ===
+app.post(
+  "/track",
+  /* authenticateToken, */ async (req, res) => {
+    console.log("--- DEBUG: /track endpoint was reached! ---");
+
+    try {
+      // Since auth is disabled, we'll hardcode a user ID for the test.
+      // Make sure user with ID 1 exists in your database.
+      const userId = 1;
+      const { website_url, website_title, total_time_seconds } = req.body;
+      const visit_date = new Date().toISOString().slice(0, 10);
+
+      console.log("Data received:", {
+        userId,
+        website_url,
+        total_time_seconds,
+      });
+
+      if (!website_url || total_time_seconds === undefined) {
+        return res.status(400).json({ error: "Missing required data" });
+      }
+
+      const query = `
       INSERT INTO time_tracking (user_id, website_url, website_title, visit_date, total_time_seconds)
       VALUES (?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE total_time_seconds = total_time_seconds + VALUES(total_time_seconds)
     `;
-    const values = [
-      userId,
-      website_url,
-      website_title,
-      visit_date,
-      total_time_seconds,
-    ];
-    console.log("Attempting to execute database query...");
-    await pool.query(query, values);
-    console.log("Query successful. Sending 200 OK response.");
-    res.status(200).json({ message: "Data saved successfully" });
-  } catch (error) {
-    console.error("!!! ERROR IN /track ROUTE:", error);
-    res.status(500).json({ error: "Internal server error during tracking." });
-  }
-});
+      const values = [
+        userId,
+        website_url,
+        website_title,
+        visit_date,
+        total_time_seconds,
+      ];
+      await pool.query(query, values);
 
-// ----------------------------------------------------------------------
-// Start the Server
-// ----------------------------------------------------------------------
+      res
+        .status(200)
+        .json({ message: "DEBUG: Data saved successfully for user 1" });
+    } catch (error) {
+      console.error("!!! ERROR IN /track ROUTE:", error);
+      res.status(500).json({ error: "Internal server error during tracking." });
+    }
+  }
+);
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
