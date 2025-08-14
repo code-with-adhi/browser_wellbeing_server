@@ -14,7 +14,8 @@ const saltRounds = 10;
 //cors configuration
 
 const whitelist = [
-  "http://127.0.0.1:5500", // <-- ADD THIS LINE for local testing
+  "http://127.0.0.1:5500",
+  "https://browser-wellbeing-dashboard.vercel.app"
 ];
 const corsOptions = {
   origin: function (origin, callback) {
